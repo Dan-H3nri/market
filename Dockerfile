@@ -13,6 +13,6 @@ COPY . .
 
 RUN mkdir -p outputs/campaigns outputs/images outputs/logs memory
 
-EXPOSE 8000 8501
+EXPOSE 8001 8501
 
-CMD ["uvicorn", "app.api:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "app.api:app", "--host", "0.0.0.0", "--port", "8001"]

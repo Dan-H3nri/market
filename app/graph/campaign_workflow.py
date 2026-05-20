@@ -112,14 +112,17 @@ async def node_quality_review(state: dict) -> dict:
 
 # ── Routing logic ───────────────────────────────────
 
+# Maps weak_section names → (revision node, shortcut destination)
+# After revision, jump straight to compliance → quality review instead
+# of re-running the entire downstream pipeline.
 _REVISION_MAP = {
     "product_data": "product_research",
     "audience_profile": "audience_psychology",
-    "strategy": "strategy",
-    "copywriting": "instagram_copywriter",
-    "carousel_structure": "carousel_structure",
-    "visual_prompt_data": "visual_prompt",
-    "hashtags": "hashtag_seo",
+    "strategy": "strategy_node",
+    "copywriting": "copywriter_node",
+    "carousel_structure": "carousel_node",
+    "visual_prompt_data": "visual_prompt_node",
+    "hashtags": "hashtag_node",
 }
 
 
@@ -138,7 +141,7 @@ def route_after_review(state: dict) -> str:
         return "finalize"
 
     target = state.get("revision_target", "")
-    next_node = _REVISION_MAP.get(target, "instagram_copywriter")
+    next_node = _REVISION_MAP.get(target, "copywriter_node")
     logger.info(f"Quality below threshold — revision loop {loop_count}, routing to {next_node}")
     return next_node
 
@@ -231,44 +234,46 @@ async def node_finalize(state: dict) -> dict:
 def build_campaign_graph() -> StateGraph:
     graph = StateGraph(CampaignState)
 
-    # Add nodes
+    # Add nodes (names must NOT collide with CampaignState keys)
     graph.add_node("product_research", node_product_research)
     graph.add_node("audience_psychology", node_audience_psychology)
-    graph.add_node("strategy", node_strategy)
-    graph.add_node("instagram_copywriter", node_copywriter)
-    graph.add_node("carousel_structure", node_carousel)
-    graph.add_node("visual_prompt", node_visual_prompt)
-    graph.add_node("image_generation", node_image_generation)
-    graph.add_node("hashtag_seo", node_hashtag_seo)
-    graph.add_node("compliance", node_compliance)
-    graph.add_node("quality_reviewer", node_quality_review)
+    graph.add_node("strategy_node", node_strategy)
+    graph.add_node("copywriter_node", node_copywriter)
+    graph.add_node("carousel_node", node_carousel)
+    graph.add_node("visual_prompt_node", node_visual_prompt)
+    graph.add_node("image_gen_node", node_image_generation)
+    graph.add_node("hashtag_node", node_hashtag_seo)
+    graph.add_node("compliance_node", node_compliance)
+    graph.add_node("quality_reviewer_node", node_quality_review)
     graph.add_node("finalize", node_finalize)
 
-    # Linear sequence
+    # Linear first-pass sequence
     graph.set_entry_point("product_research")
     graph.add_edge("product_research", "audience_psychology")
-    graph.add_edge("audience_psychology", "strategy")
-    graph.add_edge("strategy", "instagram_copywriter")
-    graph.add_edge("instagram_copywriter", "carousel_structure")
-    graph.add_edge("carousel_structure", "visual_prompt")
-    graph.add_edge("visual_prompt", "image_generation")
-    graph.add_edge("image_generation", "hashtag_seo")
-    graph.add_edge("hashtag_seo", "compliance")
-    graph.add_edge("compliance", "quality_reviewer")
+    graph.add_edge("audience_psychology", "strategy_node")
+    graph.add_edge("strategy_node", "copywriter_node")
+    graph.add_edge("copywriter_node", "carousel_node")
+    graph.add_edge("carousel_node", "visual_prompt_node")
+    graph.add_edge("visual_prompt_node", "image_gen_node")
+    graph.add_edge("image_gen_node", "hashtag_node")
+    graph.add_edge("hashtag_node", "compliance_node")
+    graph.add_edge("compliance_node", "quality_reviewer_node")
 
-    # After quality review: either finalize or loop back
+    # After quality review: either finalize or loop back for revision.
+    # Revision nodes jump straight to compliance → quality review (skipping
+    # the downstream pipeline they don't need to re-run).
     graph.add_conditional_edges(
-        "quality_reviewer",
+        "quality_reviewer_node",
         route_after_review,
         {
             "finalize": "finalize",
-            "product_research": "product_research",
-            "audience_psychology": "audience_psychology",
-            "strategy": "strategy",
-            "instagram_copywriter": "instagram_copywriter",
-            "carousel_structure": "carousel_structure",
-            "visual_prompt": "visual_prompt",
-            "hashtag_seo": "hashtag_seo",
+            "product_research": "audience_psychology",
+            "audience_psychology": "strategy_node",
+            "strategy_node": "copywriter_node",
+            "copywriter_node": "compliance_node",
+            "carousel_node": "compliance_node",
+            "visual_prompt_node": "compliance_node",
+            "hashtag_node": "compliance_node",
         },
     )
 

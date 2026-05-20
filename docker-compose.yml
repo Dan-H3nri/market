@@ -2,13 +2,13 @@ services:
   engine:
     build: .
     ports:
-      - "8000:8000"
+      - "8001:8001"
     env_file:
       - .env
     volumes:
       - ./outputs:/app/outputs
       - ./memory:/app/memory
-    command: uvicorn app.api:app --host 0.0.0.0 --port 8000
+    command: uvicorn app.api:app --host 0.0.0.0 --port 8001
 
   frontend:
     build: .

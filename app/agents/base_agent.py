@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import json
+import re
 import asyncio
 from abc import ABC, abstractmethod
 
 from infrastructure.config.settings import get_settings
 from infrastructure.providers.factory import generate_json_with_fallback, generate_with_fallback
 from infrastructure.logging.logger import get_logger
+
+_THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
 
 
 class BaseAgent(ABC):
@@ -56,12 +59,13 @@ class BaseAgent(ABC):
 
     def _parse_response(self, raw: str) -> dict | list:
         text = raw.strip()
+        text = _THINK_RE.sub("", text).strip()
         if text.startswith("```"):
             lines = text.split("\n")
             text = "\n".join(lines[1:])
-            if text.endswith("```"):
-                text = text[:-3]
-            text = text.strip()
+        if text.endswith("```"):
+            text = text[:-3]
+        text = text.strip()
         return json.loads(text)
 
     @abstractmethod

@@ -46,7 +46,7 @@ async def run_campaign(data: dict) -> dict:
     }
 
     graph = _get_graph()
-    final_state = await graph.ainvoke(initial_state)
+    final_state = await graph.ainvoke(initial_state, config={"recursion_limit": 100})
 
     # Persist to DB
     session = get_session()

@@ -4,7 +4,7 @@ import json
 import requests
 import streamlit as st
 
-API_BASE = st.secrets.get("API_BASE", "http://localhost:8000/api/v1")
+API_BASE = st.secrets.get("API_BASE", "http://localhost:8001/api/v1")
 
 st.set_page_config(page_title="Codagem Engine", layout="wide")
 st.title("Codagem — AI Agentic Marketing Engine")
@@ -71,8 +71,10 @@ if st.button("Generate Campaign", type="primary", use_container_width=True):
                     st.success("Campaign generated!")
                 else:
                     st.error(f"Generation failed: {r.text}")
-            except requests.exceptions.TimeoutError:
+            except requests.exceptions.ReadTimeout:
                 st.error("Request timed out. The workflow may still be running on the server.")
+            except requests.exceptions.ConnectionError:
+                st.error("Cannot connect to the API server. Make sure the backend is running on port 8001.")
             except Exception as e:
                 st.error(f"Error: {e}")
 
@@ -113,8 +115,8 @@ if campaign:
                     if slide.get("visual_direction"):
                         st.caption(f"Visual: {slide['visual_direction']}")
                     st.divider()
-        else:
-            st.write(slides)
+                else:
+                    st.write(slides)
 
     with tab3:
         st.markdown("### Image Prompt")

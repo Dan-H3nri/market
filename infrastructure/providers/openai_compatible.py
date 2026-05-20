@@ -3,9 +3,15 @@
 from __future__ import annotations
 
 import json
+import re
 import httpx
 
 from infrastructure.providers.base_provider import BaseLLMProvider, LLMResponse
+
+
+def _strip_think_tags(text: str) -> str:
+    """Remove <think>...</think> blocks that reasoning models may emit."""
+    return re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
 
 
 class OpenAICompatibleProvider(BaseLLMProvider):
@@ -23,6 +29,49 @@ class OpenAICompatibleProvider(BaseLLMProvider):
             hdrs["Authorization"] = f"Bearer {self.api_key}"
         return hdrs
 
+    @staticmethod
+    def _parse_sse(text: str) -> dict:
+        """Parse Server-Sent Events response into a unified dict.
+
+        Some local proxies always stream, even when ``stream`` is False.
+        This assembles all ``data:`` lines into a single OpenAI-compatible
+        response object.
+        """
+        content_parts: list[str] = []
+        model = ""
+        usage = None
+        role = ""
+
+        for line in text.splitlines():
+            line = line.strip()
+            if not line or not line.startswith("data:"):
+                continue
+            payload = line[len("data:"):].strip()
+            if payload == "[DONE]":
+                break
+            try:
+                chunk = json.loads(payload)
+            except json.JSONDecodeError:
+                continue
+            model = chunk.get("model", model) or model
+            usage = chunk.get("usage") or usage
+            for choice in chunk.get("choices", []):
+                delta = choice.get("delta", {})
+                if delta.get("role"):
+                    role = delta["role"]
+                if delta.get("content"):
+                    content_parts.append(delta["content"])
+                # Non-streaming response format
+                msg = choice.get("message", {})
+                if msg.get("content") and not content_parts:
+                    content_parts.append(msg["content"])
+
+        return {
+            "choices": [{"message": {"role": role or "assistant", "content": "".join(content_parts)}}],
+            "model": model,
+            "usage": usage,
+        }
+
     async def generate(self, prompt: str, system: str | None = None, **kwargs) -> LLMResponse:
         messages = []
         if system:
@@ -34,6 +83,7 @@ class OpenAICompatibleProvider(BaseLLMProvider):
             "messages": messages,
             "temperature": kwargs.get("temperature", 0.7),
             "max_tokens": kwargs.get("max_tokens", 4096),
+            "stream": False,
         }
 
         async with httpx.AsyncClient(timeout=self.timeout) as client:
@@ -43,12 +93,17 @@ class OpenAICompatibleProvider(BaseLLMProvider):
                 json=payload,
             )
             resp.raise_for_status()
-            data = resp.json()
+            content_type = resp.headers.get("content-type", "")
 
-        content = data["choices"][0]["message"]["content"]
+            if "text/event-stream" in content_type or resp.text.strip().startswith("data:"):
+                data = self._parse_sse(resp.text)
+            else:
+                data = resp.json()
+
+        message_content = data["choices"][0]["message"]["content"]
         usage = data.get("usage")
         return LLMResponse(
-            content=content,
+            content=message_content,
             model=data.get("model", self.model),
             provider=self.name,
             usage=usage,
@@ -57,12 +112,11 @@ class OpenAICompatibleProvider(BaseLLMProvider):
     async def generate_json(self, prompt: str, system: str | None = None, **kwargs) -> LLMResponse:
         json_system = (system or "") + "\nYou MUST respond with valid JSON only. No markdown, no commentary."
         resp = await self.generate(prompt, system=json_system, **kwargs)
-        # Strip markdown fences if the model wraps output
-        text = resp.content.strip()
+        text = _strip_think_tags(resp.content)
         if text.startswith("```"):
             text = text.split("\n", 1)[1] if "\n" in text else text[3:]
-            if text.endswith("```"):
-                text = text[:-3]
-            text = text.strip()
+        if text.endswith("```"):
+            text = text[:-3]
+        text = text.strip()
         resp.content = text
         return resp
